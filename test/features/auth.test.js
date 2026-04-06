@@ -132,4 +132,43 @@ describe('Authentication Header Forwarding', () => {
     // HF requests use protocol passthrough — proxy does not inject Cache-Control
     expect(response.headers.get('Cache-Control')).toBeNull();
   });
+
+  it('follows HuggingFace 307 resolve-cache redirects with a fresh direct request', async () => {
+    const resolvedBody = JSON.stringify({ model_type: 'whisper' });
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        // First call: HF resolve endpoint returns 307 to resolve-cache
+        new Response('redirect target', {
+          status: 307,
+          headers: {
+            Location: '/api/resolve-cache/models/openai/whisper-large-v3/abc123/config.json'
+          }
+        })
+      )
+      .mockResolvedValueOnce(
+        // Second call: fresh direct request to resolve-cache returns 200
+        new Response(resolvedBody, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': String(resolvedBody.length)
+          }
+        })
+      );
+
+    const response = await worker.fetch(
+      new Request('https://example.com/hf/openai/whisper-large-v3/resolve/main/config.json'),
+      {},
+      executionContext
+    );
+
+    expect(response.status).toBe(200);
+    // First fetch: to HF resolve endpoint (with redirect: 'manual')
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    // Second fetch: fresh direct request to resolved absolute URL
+    const secondCallUrl = fetchSpy.mock.calls[1][0].toString();
+    expect(secondCallUrl).toContain('api/resolve-cache');
+    expect(secondCallUrl).toContain('huggingface.co');
+  });
 });

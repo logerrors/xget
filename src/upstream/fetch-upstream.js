@@ -132,6 +132,44 @@ function createFetchOptions({
 }
 
 /**
+ * Follows a HuggingFace redirect by making a fresh direct request to the resolved URL.
+ *
+ * HuggingFace's resolve endpoint returns 307 redirects to internal
+ * `/api/resolve-cache/` endpoints. Following these via Cloudflare's `redirect: 'follow'`
+ * is blocked by HuggingFace's Cloudflare infrastructure (returns error 1042).
+ * A fresh direct subrequest (not a redirect chain hop) reaches the same endpoint
+ * successfully.
+ * @param {Response} response
+ * @param {string} targetUrl
+ * @param {RequestInit} finalFetchOptions
+ * @returns {Promise<Response>} Redirect-followed response, or the original response when no redirect is needed.
+ */
+async function followHFRedirectIfNeeded(response, targetUrl, finalFetchOptions) {
+  if (
+    response.status !== 301 &&
+    response.status !== 302 &&
+    response.status !== 303 &&
+    response.status !== 307 &&
+    response.status !== 308
+  ) {
+    return response;
+  }
+
+  const location = response.headers.get('Location');
+  if (!location) {
+    return response;
+  }
+
+  // Resolve relative Location URLs against the original upstream host
+  const redirectUrl = new URL(location, targetUrl);
+
+  return await fetch(redirectUrl, {
+    ...finalFetchOptions,
+    redirect: 'follow'
+  });
+}
+
+/**
  * Follows a Docker redirect without forwarding credentials to the redirected host.
  * @param {Response} response
  * @param {string} targetUrl
@@ -167,12 +205,13 @@ async function followDockerRedirectIfNeeded(response, targetUrl, finalFetchOptio
 }
 
 /**
- * Executes the upstream fetch, including HEAD fallback probing and Docker redirect handling.
+ * Executes the upstream fetch, including HEAD fallback probing and Docker/HF redirect handling.
  * @param {{
  *   fetchOptions: RequestInit,
  *   request: Request,
  *   requestContext: {
- *     isDocker: boolean
+ *     isDocker: boolean,
+ *     isHF: boolean
  *   },
  *   requestHeaders: Headers,
  *   targetUrl: string
@@ -185,13 +224,17 @@ async function executeFetch({ fetchOptions, request, requestContext, requestHead
     signal: /** @type {AbortSignal} */ (fetchOptions.signal)
   });
 
-  if (requestContext.isDocker) {
+  if (requestContext.isDocker || requestContext.isHF) {
     finalFetchOptions.redirect = 'manual';
   }
 
   let response;
   if (request.method === 'HEAD') {
     response = await fetch(targetUrl, finalFetchOptions);
+
+    if (requestContext.isHF) {
+      response = await followHFRedirectIfNeeded(response, targetUrl, finalFetchOptions);
+    }
 
     if (response.ok && !response.headers.get('Content-Length')) {
       const rangeHeaders = new Headers(requestHeaders);
@@ -233,6 +276,8 @@ async function executeFetch({ fetchOptions, request, requestContext, requestHead
 
   if (requestContext.isDocker) {
     response = await followDockerRedirectIfNeeded(response, targetUrl, finalFetchOptions);
+  } else if (requestContext.isHF) {
+    response = await followHFRedirectIfNeeded(response, targetUrl, finalFetchOptions);
   }
 
   return response;

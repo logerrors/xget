@@ -21,27 +21,20 @@
  */
 
 /**
- * Detects if a request is a Hugging Face API operation.
+ * Detects if a request is a Hugging Face operation.
  *
- * Identifies Hugging Face API requests by checking for:
- * - Hugging Face platform prefix (/hf/)
- * - API path segment (/api/)
+ * All requests under the /hf/ prefix are treated as Hugging Face protocol
+ * requests to ensure headers like `huggingface-metadata-only` are forwarded
+ * correctly. Without passthrough, stripping that header causes HuggingFace to
+ * return full multi-GB model files during metadata-only checks, triggering
+ * timeouts and breaking the huggingface_hub download flow.
  * @param {Request} request - The incoming request object
  * @param {URL} url - Parsed URL object
- * @returns {boolean} True if this is a Hugging Face API operation
+ * @returns {boolean} True if this is a Hugging Face request
  */
 export function isHuggingFaceAPIRequest(request, url) {
-  // Check for Hugging Face API endpoints
-  if (url.pathname.startsWith('/hf/api/')) {
-    return true;
-  }
-
-  // Also check for token endpoint which is often used
-  if (url.pathname.startsWith('/hf/token')) {
-    return true;
-  }
-
-  return false;
+  void request;
+  return url.pathname.startsWith('/hf/');
 }
 
 /**

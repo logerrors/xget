@@ -86,16 +86,18 @@ describe('Protocol helper coverage', () => {
     expect(objectHeaders.get('Accept')).toBe('application/octet-stream');
   });
 
-  it('detects Hugging Face API and token passthrough endpoints', () => {
+  it('detects all Hugging Face requests under /hf/ as passthrough', () => {
     const apiRequest = new Request('https://example.com/hf/api/models/demo');
     const tokenRequest = new Request('https://example.com/hf/token');
-    const regularRequest = new Request(
+    const fileRequest = new Request(
       'https://example.com/hf/meta-llama/model/resolve/main/config.json'
     );
+    const nonHfRequest = new Request('https://example.com/gh/owner/repo');
 
     expect(isHuggingFaceAPIRequest(apiRequest, new URL(apiRequest.url))).toBe(true);
     expect(isHuggingFaceAPIRequest(tokenRequest, new URL(tokenRequest.url))).toBe(true);
-    expect(isHuggingFaceAPIRequest(regularRequest, new URL(regularRequest.url))).toBe(false);
+    expect(isHuggingFaceAPIRequest(fileRequest, new URL(fileRequest.url))).toBe(true);
+    expect(isHuggingFaceAPIRequest(nonHfRequest, new URL(nonHfRequest.url))).toBe(false);
   });
 
   it('configures Hugging Face headers without overwriting explicit content types', () => {
